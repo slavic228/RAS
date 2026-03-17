@@ -30,8 +30,17 @@ class OracleConnector(DatabaseConnector):
         user = self._require_env(f"{prefix}_USER", alias)
         password = self._require_env(f"{prefix}_PASSWORD", alias)
 
+        # Oracle's thin driver treats `@` in credentials as a service-name
+        # separator (e.g. "user@service").  Wrapping the value in double quotes
+        # tells the driver to treat the whole string as a literal credential.
+        # Passwords with special chars get the same treatment.
+        quoted_user = _oracle_quote(user)
+        quoted_password = _oracle_quote(password)
+
         try:
-            self._connection = oracledb.connect(user=user, password=password, dsn=dsn)
+            self._connection = oracledb.connect(
+                user=quoted_user, password=quoted_password, dsn=dsn
+            )
         except oracledb.Error as exc:
             raise DatabaseError(
                 f"Failed to connect to Oracle database alias '{alias}': {exc}"
@@ -65,3 +74,22 @@ class OracleConnector(DatabaseConnector):
                 f"database alias '{alias}'."
             )
         return value
+
+
+def _oracle_quote(value: str) -> str:
+    """
+    Wrap a credential value in double quotes so the oracledb thin driver
+    treats it as a literal string rather than parsing special characters.
+
+    Characters that require quoting:
+      @  — misinterpreted as a service-name separator
+      /  — misinterpreted as a user/password separator
+      "  — must be escaped by doubling inside the outer quotes
+
+    Values that are already double-quoted are left unchanged.
+    """
+    _SPECIAL = {"@", "/", " ", "(", ")"}
+    if any(ch in value for ch in _SPECIAL):
+        escaped = value.replace('"', '""')  # escape any embedded double-quotes
+        return f'"{escaped}"'
+    return value
