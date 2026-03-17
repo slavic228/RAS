@@ -1,0 +1,102 @@
+workflow:
+  name: "Daily Reconciliation"
+  description: "End-of-day reconciliation with FX enrichment"
+
+  # ── PRECONDITIONS ────────────────────────────────────────────────────────────
+  # Block the workflow until the EOD batch process has completed.
+  preconditions:
+    - type: query_poller
+      description: "Wait for EOD batch to complete"
+      database_alias: "oracle_prod"
+      sql_file: "examples/sql/checks/eod_batch_done.sql"
+      poll_interval_minutes: 5
+      deadline_time: "08:00"
+
+  # ── REPORTS ──────────────────────────────────────────────────────────────────
+  reports:
+    # Report 1: Simple — single SQL source, no transform needed.
+    # IdentityTransform is used automatically.
+    - name: "Account Balances"
+      on_failure: abort
+      sources:
+        - alias: "balances"
+          type: sql
+          database_alias: "oracle_prod"
+          sql_file: "examples/sql/reports/account_balances.sql"
+
+    # Report 2: Simple — SQL from a different database.
+    - name: "Transaction Log"
+      on_failure: skip
+      sources:
+        - alias: "transactions"
+          type: sql
+          database_alias: "mssql_dwh"
+          sql_file: "examples/sql/reports/transaction_log.sql"
+
+    # Report 3: Complex — SQL + API sources merged by a custom transform function.
+    - name: "Transactions with FX Rates"
+      on_failure: skip
+      sources:
+        - alias: "transactions"
+          type: sql
+          database_alias: "oracle_prod"
+          sql_file: "examples/sql/reports/transactions.sql"
+        - alias: "fx_rates"
+          type: api
+          url: "https://api.exchangerate.host/latest"
+          method: GET
+          timeout_seconds: 30
+          headers:
+            X-Api-Key: "${API_KEY_FX}"
+          response_path: "$.rates"
+      transform:
+        module: "transforms.examples.fx_reconciliation"
+        function: "merge_with_rates"
+
+  # ── OUTPUTS ──────────────────────────────────────────────────────────────────
+  # Execution phase: defines how reports are grouped into .xlsx files.
+  # This is completely independent from who receives the files.
+  outputs:
+    - type: excel
+      output_dir: "output"
+      workbook_groups:
+        # Reports 1 and 3 share a workbook (two sheets).
+        - workbook: "reconciliation_{date}.xlsx"
+          reports:
+            - "Account Balances"
+            - "Transactions with FX Rates"
+        # Report 2 gets its own workbook.
+        - workbook: "transaction_log_{date}.xlsx"
+          reports:
+            - "Transaction Log"
+
+  # ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+  # Distribution phase: completely decoupled from execution and export.
+  # Each block independently selects its report subset and recipients.
+  # The same report can appear in multiple blocks (sent independently).
+  notifications:
+    # Recipient 1 receives all three reports.
+    - type: email
+      smtp_alias: "smtp_corp"
+      to:
+        - "recipient1@company.com"
+      cc:
+        - "manager@company.com"
+      subject: "Daily Reconciliation — {date}"
+      body_template: "templates/email_body.html.j2"
+      reports:
+        - "Account Balances"
+        - "Transaction Log"
+        - "Transactions with FX Rates"
+
+    # Recipient 2 receives only reports 2 and 3, independently.
+    # Adding this block required zero code changes — only this YAML addition.
+    - type: email
+      smtp_alias: "smtp_corp"
+      to:
+        - "recipient2@company.com"
+      subject: "FX & Transaction Report — {date}"
+      body_template: "templates/email_body.html.j2"
+      reports:
+        - "Transaction Log"
+        - "Transactions with FX Rates"

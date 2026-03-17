@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "report-runner"
+version = "1.0.0"
+description = "Production-grade modular report automation CLI"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7,<3",
+    "pyyaml>=6.0,<7",
+    "dependency-injector>=4.41,<5",
+    "openpyxl>=3.1,<4",
+    "jinja2>=3.1,<4",
+    "python-dotenv>=1.0,<2",
+    "loguru>=0.7,<1",
+    "httpx>=0.27,<1",
+    "jsonpath-ng>=1.6,<2",
+    "oracledb>=2.3,<3",
+    "pyodbc>=5.1,<6",
+    "psycopg2-binary>=2.9,<3",
+    "pandas>=2.2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9",
+    "pytest-mock>=3.14,<4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["report_runner*", "transforms*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

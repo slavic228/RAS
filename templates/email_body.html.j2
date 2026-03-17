@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body        { font-family: Arial, sans-serif; font-size: 14px; color: #333; }
+    h2          { color: #2c5f8a; }
+    table       { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th          { background-color: #D9E1F2; font-weight: bold; text-align: left;
+                  padding: 8px 12px; border: 1px solid #b0b8d0; }
+    td          { padding: 7px 12px; border: 1px solid #d0d8e8; vertical-align: top; }
+    tr:nth-child(even) td { background-color: #f5f7fc; }
+    .success    { color: #27ae60; font-weight: bold; }
+    .failed     { color: #e74c3c; font-weight: bold; }
+    .skipped    { color: #f39c12; font-weight: bold; }
+    .footer     { margin-top: 24px; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <h2>{{ workflow_name }}</h2>
+  <p>
+    <strong>Run date:</strong> {{ run_date }}<br />
+    <strong>Started at:</strong> {{ run_started_at }}
+  </p>
+
+  <h3>Report Summary</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Report</th>
+        <th>Status</th>
+        <th>Rows</th>
+        <th>Duration (s)</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for result in results %}
+      <tr>
+        <td>{{ result.report_name }}</td>
+        <td class="{{ result.status }}">{{ result.status | upper }}</td>
+        <td>{{ result.row_count }}</td>
+        <td>
+          {% set duration = (result.finished_at - result.started_at).total_seconds() %}
+          {{ "%.1f" | format(duration) }}
+        </td>
+        <td>
+          {% if result.error_message %}
+            {{ result.error_message }}
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if attached_files %}
+  <h3>Attachments</h3>
+  <ul>
+    {% for f in attached_files %}
+    <li>{{ f.path.name }} — {{ f.report_names | join(", ") }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <p class="footer">
+    This email was generated automatically by the Report Runner.
+    Do not reply to this message.
+  </p>
+</body>
+</html>
