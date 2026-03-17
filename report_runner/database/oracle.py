@@ -2,12 +2,20 @@
 Oracle database connector using the oracledb driver (python-oracledb).
 
 Credentials are read from environment variables following the naming convention:
-  DB_{ALIAS_UPPER}_DSN
-  DB_{ALIAS_UPPER}_USER
-  DB_{ALIAS_UPPER}_PASSWORD
+  DB_{ALIAS_UPPER}_DSN      — host:port/service_name  (EZConnect format)
+  DB_{ALIAS_UPPER}_USER     — username (may contain @ for domain users)
+  DB_{ALIAS_UPPER}_PASSWORD — password (may contain special characters)
 
 Example alias "oracle_prod" → env keys:
   DB_ORACLE_PROD_DSN, DB_ORACLE_PROD_USER, DB_ORACLE_PROD_PASSWORD
+
+Connection approach: builds a single EZConnect string
+  [user]/[password]@host:port/service_name
+
+When user or password contain special characters (@, /, space, brackets),
+they are wrapped in Oracle double-quote syntax INSIDE the connection string.
+This is the correct quoting context — double-quoting works in the DSN string,
+not as Python keyword arguments to oracledb.connect().
 """
 
 from __future__ import annotations
@@ -30,17 +38,15 @@ class OracleConnector(DatabaseConnector):
         user = self._require_env(f"{prefix}_USER", alias)
         password = self._require_env(f"{prefix}_PASSWORD", alias)
 
-        # Oracle's thin driver treats `@` in credentials as a service-name
-        # separator (e.g. "user@service").  Wrapping the value in double quotes
-        # tells the driver to treat the whole string as a literal credential.
-        # Passwords with special chars get the same treatment.
-        quoted_user = _oracle_quote(user)
-        quoted_password = _oracle_quote(password)
+        # Build a single EZConnect string: [user]/[password]@dsn
+        # Quoting special chars (@ / space [ ]) in this context is correct —
+        # the double-quote syntax applies to the DSN string parser, not to
+        # keyword arguments.  This matches the pattern:
+        #   oracledb.connect("user/password@host:port/service")
+        connect_string = _build_connect_string(user, password, dsn)
 
         try:
-            self._connection = oracledb.connect(
-                user=quoted_user, password=quoted_password, dsn=dsn
-            )
+            self._connection = oracledb.connect(connect_string)
         except oracledb.Error as exc:
             raise DatabaseError(
                 f"Failed to connect to Oracle database alias '{alias}': {exc}"
@@ -76,20 +82,33 @@ class OracleConnector(DatabaseConnector):
         return value
 
 
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+def _build_connect_string(user: str, password: str, dsn: str) -> str:
+    """
+    Assemble the EZConnect string: [user]/[password]@dsn
+
+    Special characters in user or password are handled by wrapping the value
+    in Oracle double-quote syntax.  Any embedded double-quote characters are
+    escaped by doubling them ("").
+    """
+    return f"{_oracle_quote(user)}/{_oracle_quote(password)}@{dsn}"
+
+
 def _oracle_quote(value: str) -> str:
     """
-    Wrap a credential value in double quotes so the oracledb thin driver
-    treats it as a literal string rather than parsing special characters.
+    Wrap a credential in Oracle double-quote syntax when it contains characters
+    that the EZConnect string parser would otherwise misinterpret:
 
-    Characters that require quoting:
-      @  — misinterpreted as a service-name separator
-      /  — misinterpreted as a user/password separator
-      "  — must be escaped by doubling inside the outer quotes
+      @  — split point between credentials and host
+      /  — split point between user and password
+      space, (, ) — structural characters in full TNS descriptors
 
-    Values that are already double-quoted are left unchanged.
+    Embedded double-quote characters within the value are escaped by doubling.
+    Plain values (no special chars) are returned unchanged.
     """
     _SPECIAL = {"@", "/", " ", "(", ")"}
     if any(ch in value for ch in _SPECIAL):
-        escaped = value.replace('"', '""')  # escape any embedded double-quotes
+        escaped = value.replace('"', '""')
         return f'"{escaped}"'
     return value
